@@ -1,0 +1,418 @@
+---
+title: "L. goldeii and L. fus telemetry paper 2015-Apr 2017"
+author: "Ajay Venkataraman"
+date: "2024-07-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+# Install packages to add and manipulate data
+
+```{r packages}
+library(tidyverse)
+library(ggmap)
+library(VTrack)
+library(leaflet)
+library(openxlsx)
+library(data.table)
+library(htmlwidgets)
+library(sp)
+getwd()
+```
+# Import csv files to R (change filepath if need be)
+
+
+```{r }
+
+bb1 <- read_csv("../data/1.BLACK BASS.csv")
+bb2 <- read_csv("../data/1.1.wet seaon 2016-17.csv")
+bb3 <- read_csv("../data/2.Baia 2017.csv")
+bb4 <- read_csv("../data/2.1.Baia sep 2018 last download this study.csv")
+```
+# Merge and first clean up on telemetry dataset
+
+```{r }
+df1 <- bind_rows(bb1, bb2, bb3, bb4) %>%
+    select(!c("Transmitter Name", "Transmitter Serial", "Sensor Value", "Sensor Unit", "Transmitter Type", "Sensor Precision"))
+```
+
+## Split transmitter and receiver column values to retain only second numbers
+
+```{r }
+df1$Receiver <- sapply(strsplit(df1$Receiver, "-"), function(x) x[2])
+df1$Transmitter <- sapply(strsplit(df1$Transmitter, "-"), function(x) tail(x, 1))
+```
+
+## Change time from UTC to AEST and to POSIXCT format
+```{r }
+df1 <- 
+  df1 %>%
+  mutate(datetimeEST = with_tz(as.POSIXct(`Date and Time (UTC)`, format = "%Y-%m-%d %H:%M:%S",  tz= "UTC")), tzone = "Australia/Brisbane", .keep = "unused") %>% ## Change time from UTC to AEST and to POSIXCT format 
+  select(!tzone) ##remove timezone column
+```
+
+# Import and clean tagged fish and receiver data
+```{r }
+fishtags <- read_csv("../data/tagged fish 2015-2017.csv")
+fishtags <- fishtags[ , -c(8:22)]
+```
+
+#Import receiver history data (REDUNDANT)
+```{r}
+receivers <- read.csv("C:/Users/jc347879/OneDrive - James Cook University/Documents/Ajay PhD/writing/thesis_chapter 2/ajay sheets/receivers history jun2015-apr2017.csv")
+receivers <- receivers[-c(41:102), ]
+receivers [receivers == ""] <- NA
+## Convert date columns to the correct format
+receivers$dd1 <- as.POSIXct(receivers$dd1)
+receivers$dr1 <- as.POSIXct(receivers$dr1)
+receivers$dd2 <- as.POSIXct(receivers$dd2)
+receivers$dr2 <- as.POSIXct(receivers$dr2)
+receivers$dd3 <- as.POSIXct(receivers$dd3)
+receivers$dr3 <- as.POSIXct(receivers$dr3)
+receivers$dd4 <- as.POSIXct(receivers$dd4)
+receivers$dr4 <- as.POSIXct(receivers$dr4)
+```
+
+# Merge tagged fish with telemetry dataset
+```{r}
+df2 <- merge(df1, fishtags, by.x = "Transmitter", by.y = "transmitter", all.x = TRUE)
+
+df1A <- rename(df1, transmitter=Transmitter)
+fishtags$transmitter <- as.character(fishtags$transmitter)
+df2A <- df1A %>% 
+  left_join(fishtags, by= "transmitter")
+```
+
+# Create filtered df2: Filter df2 to include observations only till 1st of April 2017
+```{r}
+target_date <- as.POSIXct("2017-04-01", tz = "EST")
+filtered_df2 <- df2 %>%
+  filter(complete.cases(species), species != "", datetimeEST <= target_date)
+```
+
+# Clean up filtered_df2: Rename date column to tagged date for species
+```{r}
+filtered_df2 <- rename(filtered_df2, tagdate = date)
+## Split datetimeEST to date
+filtered_df2 <- filtered_df2 %>% mutate(date=date(datetimeEST)) 
+## Keep only non-blank species rows
+filtered_df2 <- filtered_df2 %>%
+  filter(!is.na(species) & species != "")
+```
+
+# Ensure datetimeEST is in the correct date-time format
+```{r}
+filtered_df2$datetimeEST <- as.POSIXct(filtered_df2$datetimeEST, format="%Y-%m-%d %H:%M:%S")
+```
+
+# Use case_when to create the Station.Name column based on updated conditions
+```{r}
+filtered_df2 <- filtered_df2 %>%
+  mutate(Station.Name = case_when(
+    # LL1
+    Receiver == "125667" & datetimeEST >= as.POSIXct("2015-06-18") & datetimeEST <= as.POSIXct("2016-11-22") ~ "LL1",
+    Receiver == "127283" & datetimeEST >= as.POSIXct("2016-11-21") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL1",
+    
+    # LL11
+    Receiver == "125668" & datetimeEST >= as.POSIXct("2015-06-18") & datetimeEST <= as.POSIXct("2015-11-09") ~ "LL11",
+    
+    # LL14
+    Receiver == "125669" & datetimeEST >= as.POSIXct("2015-06-20") & datetimeEST <= as.POSIXct("2015-11-10") ~ "LL14",
+    Receiver == "125669" & datetimeEST >= as.POSIXct("2016-03-31") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL14",
+    
+    # LL15
+    Receiver == "125670" & datetimeEST >= as.POSIXct("2015-06-18") & datetimeEST <= as.POSIXct("2015-11-10") ~ "LL15",
+    Receiver == "127277" & datetimeEST >= as.POSIXct("2016-03-31") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL15",
+    
+    # LL2
+    Receiver == "125671" & datetimeEST >= as.POSIXct("2015-06-18") & datetimeEST <= as.POSIXct("2016-03-30") ~ "LL2",
+    Receiver == "127286" & datetimeEST >= as.POSIXct("2016-03-31") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL2",
+    
+    # LL3
+    Receiver == "125672" & datetimeEST >= as.POSIXct("2015-06-18") & datetimeEST <= as.POSIXct("2016-11-22") ~ "LL3",
+    Receiver == "127289" & datetimeEST >= as.POSIXct("2016-11-21") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL3",
+    
+    # LL4
+    Receiver == "125673" & datetimeEST >= as.POSIXct("2015-06-18") & datetimeEST <= as.POSIXct("2016-11-20") ~ "LL4",
+    Receiver == "127271" & datetimeEST >= as.POSIXct("2016-11-21") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL4",
+    
+    # LL7
+    Receiver == "125674" & datetimeEST >= as.POSIXct("2015-06-19") & datetimeEST <= as.POSIXct("2016-11-20") ~ "LL7",
+    Receiver == "127272" & datetimeEST >= as.POSIXct("2016-11-21") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL7",
+    
+    # LL9
+    Receiver == "125675" & datetimeEST >= as.POSIXct("2015-06-19") & datetimeEST <= as.POSIXct("2016-11-21") ~ "LL9",
+    Receiver == "127279" & datetimeEST >= as.POSIXct("2016-11-22") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL9",
+    
+    # LL8
+    Receiver == "127273" & datetimeEST >= as.POSIXct("2015-06-23") & datetimeEST <= as.POSIXct("2016-11-21") ~ "LL8",
+    Receiver == "127290" & datetimeEST >= as.POSIXct("2016-11-22") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL8",
+    
+    # LL6
+    Receiver == "127271" & datetimeEST >= as.POSIXct("2015-06-23") & datetimeEST <= as.POSIXct("2016-11-19") ~ "LL6",
+    Receiver == "125670" & datetimeEST >= as.POSIXct("2016-11-20") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL6",
+    
+    # LL5
+    Receiver == "127272" & datetimeEST >= as.POSIXct("2015-06-23") & datetimeEST <= as.POSIXct("2016-11-19") ~ "LL5",
+    Receiver == "127284" & datetimeEST >= as.POSIXct("2016-11-20") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL5",
+    
+    # LL13
+    Receiver == "127283" & datetimeEST >= as.POSIXct("2016-03-31") & datetimeEST <= as.POSIXct("2016-11-17") ~ "LL13",
+    
+    # LL12
+    Receiver == "127282" & datetimeEST >= as.POSIXct("2015-07-12") & datetimeEST <= as.POSIXct("2015-11-09") ~ "LL12",
+    Receiver == "127281" & datetimeEST >= as.POSIXct("2016-03-31") & datetimeEST <= as.POSIXct("2016-11-17") ~ "LL12",
+    
+    # LL10
+    Receiver == "127288" & datetimeEST >= as.POSIXct("2015-10-03") & datetimeEST <= as.POSIXct("2016-11-20") ~ "LL10",
+    Receiver == "127280" & datetimeEST >= as.POSIXct("2016-11-21") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL10",
+    
+    # P1
+    Receiver == "125678" & datetimeEST >= as.POSIXct("2015-06-20") & datetimeEST <= as.POSIXct("2015-11-08") ~ "P1",
+    Receiver == "125678" & datetimeEST >= as.POSIXct("2016-04-08") & datetimeEST <= as.POSIXct("2016-09-26") ~ "P1",
+    Receiver == "127292" & datetimeEST >= as.POSIXct("2016-09-27") & datetimeEST <= as.POSIXct("2016-11-17") ~ "P1",
+    
+    # P2
+    Receiver == "125676" & datetimeEST >= as.POSIXct("2015-06-19") & datetimeEST <= as.POSIXct("2015-11-08") ~ "P2",
+    Receiver == "125676" & datetimeEST >= as.POSIXct("2016-04-08") & datetimeEST <= as.POSIXct("2016-09-26") ~ "P2",
+    Receiver == "127266" & datetimeEST >= as.POSIXct("2016-09-27") & datetimeEST <= as.POSIXct("2016-11-17") ~ "P2",
+    
+    # P3
+    Receiver == "125677" & datetimeEST >= as.POSIXct("2015-06-19") & datetimeEST <= as.POSIXct("2015-11-08") ~ "P3",
+    Receiver == "125677" & datetimeEST >= as.POSIXct("2016-04-08") & datetimeEST <= as.POSIXct("2016-11-18") ~ "P3",
+    
+    # P4
+    Receiver == "127264" & datetimeEST >= as.POSIXct("2015-06-20") & datetimeEST <= as.POSIXct("2015-11-07") ~ "P4",
+    Receiver == "127264" & datetimeEST >= as.POSIXct("2016-04-08") & datetimeEST <= as.POSIXct("2016-11-17") ~ "P4",
+    
+    # LL-P
+    Receiver == "127282" & datetimeEST >= as.POSIXct("2015-11-09") & datetimeEST <= as.POSIXct("2016-11-21") ~ "LL-P",
+    Receiver == "127281" & datetimeEST >= as.POSIXct("2016-11-22") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LL-P",
+    
+    # T8
+    Receiver == "127266" & datetimeEST >= as.POSIXct("2015-06-22") & datetimeEST <= as.POSIXct("2015-11-09") ~ "T8",
+    Receiver == "127290" & datetimeEST >= as.POSIXct("2016-04-07") & datetimeEST <= as.POSIXct("2016-11-18") ~ "T8",
+    
+    # T6
+    Receiver == "127268" & datetimeEST >= as.POSIXct("2015-06-22") & datetimeEST <= as.POSIXct("2015-11-10") ~ "T6",
+    
+    # T3
+    Receiver == "127267" & datetimeEST >= as.POSIXct("2015-06-22") & datetimeEST <= as.POSIXct("2015-11-10") ~ "T3",
+    
+    # T2
+    Receiver == "127270" & datetimeEST >= as.POSIXct("2015-06-22") & datetimeEST <= as.POSIXct("2015-11-10") ~ "T2",
+    
+    # T4
+    Receiver == "127269" & datetimeEST >= as.POSIXct("2015-06-22") & datetimeEST <= as.POSIXct("2015-11-10") ~ "T4",
+    Receiver == "127267" & datetimeEST >= as.POSIXct("2016-04-07") & datetimeEST <= as.POSIXct("2016-11-19") ~ "T4",
+    
+    # T1
+    Receiver == "127263" & datetimeEST >= as.POSIXct("2015-06-30") & datetimeEST <= as.POSIXct("2015-11-09") ~ "T1",
+    
+    # T5
+    Receiver == "127275" & datetimeEST >= as.POSIXct("2015-07-10") & datetimeEST <= as.POSIXct("2015-11-10") ~ "T5",
+    
+    # LLC2
+    Receiver == "127277" & datetimeEST >= as.POSIXct("2015-07-12") & datetimeEST <= as.POSIXct("2015-11-10") ~ "LLC2",
+    Receiver == "125670" & datetimeEST >= as.POSIXct("2015-11-10") & datetimeEST <= as.POSIXct("2016-11-18") ~ "LLC2",
+    Receiver == "545562" & datetimeEST >= as.POSIXct("2016-11-19") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LLC2",
+    
+    # LLC1
+    Receiver == "127278" & datetimeEST >= as.POSIXct("2015-07-12") & datetimeEST <= as.POSIXct("2015-11-09") ~ "LLC1",
+    Receiver == "545563" & datetimeEST >= as.POSIXct("2016-11-19") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LLC1",
+    
+    # LLC3
+    Receiver == "127279" & datetimeEST >= as.POSIXct("2015-07-12") & datetimeEST <= as.POSIXct("2016-11-16") ~ "LLC3",
+    Receiver == "127264" & datetimeEST >= as.POSIXct("2016-11-17") & datetimeEST <= as.POSIXct("2017-04-01") ~ "LLC3",
+    
+    # OPC
+    Receiver == "127281" & datetimeEST >= as.POSIXct("2015-07-12") & datetimeEST <= as.POSIXct("2016-11-09") ~ "OPC",
+    Receiver == "127280" & datetimeEST >= as.POSIXct("2015-11-10") & datetimeEST <= as.POSIXct("2016-11-18") ~ "OPC",
+    Receiver == "127266" & datetimeEST >= as.POSIXct("2016-11-19") & datetimeEST <= as.POSIXct("2017-04-01") ~ "OPC",
+    
+    # PC1
+    Receiver == "127280" & datetimeEST >= as.POSIXct("2015-07-12") & datetimeEST <= as.POSIXct("2015-11-06") ~ "PC1",
+    Receiver == "545562" & datetimeEST >= as.POSIXct("2015-11-07") & datetimeEST <= as.POSIXct("2016-11-18") ~ "PC1",
+    Receiver == "545561" & datetimeEST >= as.POSIXct("2016-09-25") & datetimeEST <= as.POSIXct("2017-04-01") ~ "PC1",
+    
+    # TR1
+    Receiver == "127289" & datetimeEST >= as.POSIXct("2015-09-30") & datetimeEST <= as.POSIXct("2016-09-20") ~ "TR1",
+    
+    # TR2
+    Receiver == "127285" & datetimeEST >= as.POSIXct("2015-09-30") & datetimeEST <= as.POSIXct("2016-09-20") ~ "TR2",
+    
+    # RDP
+    Receiver == "127287" & datetimeEST >= as.POSIXct("2016-04-08") & datetimeEST <= as.POSIXct("2016-09-24") ~ "RDP",
+    Receiver == "127292" & datetimeEST >= as.POSIXct("2016-09-19") & datetimeEST <= as.POSIXct("2017-04-01") ~ "RDP",
+    
+    # RLL
+    Receiver == "127292" & datetimeEST >= as.POSIXct("2016-04-08") & datetimeEST <= as.POSIXct("2016-09-26") ~ "RLL",
+    Receiver == "127287" & datetimeEST >= as.POSIXct("2016-09-25") & datetimeEST <= as.POSIXct("2017-04-01") ~ "RLL",
+    
+    # T9
+    Receiver == "127276" & datetimeEST >= as.POSIXct("2015-07-12") & datetimeEST <= as.POSIXct("2015-09-30") ~ "T9",
+    
+    # Default
+    TRUE ~ NA_character_
+  ))
+```
+
+# Add coordinates for receiver sites
+```{r}
+station_coords <- data.frame(
+  Station.Name = c("LL1", "LL11", "LL14", "LL15", "LL2", "LL3", "LL4", "LL7", "LL9", "LL8",
+                   "LL6", "LL5", "LL13", "LL12", "LL10", "P1", "P2", "P3", "P4", "LL-P",
+                   "LLC2", "LLC1", "LLC3", "OPC", "PC1", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"),
+  Latitude = c(-4.95223, -4.95115, -4.96095, -4.96123, -4.95548, -4.95937, -4.95283, -4.94506, -4.94601, -4.94356,
+               -4.94692, -4.95043, -4.95967, -4.95383, -4.94987, -4.93681, -4.94228, -4.94654, -4.95575, -4.94918,
+               -4.94625, -4.94637, -4.94773, -4.93797, -4.93293, -4.71193, -4.71568, -4.71802, -4.72402, -4.71747, -4.71335, -4.71627, -4.71522),
+  Longitude = c(151.4746, 151.4851, 151.4897167, 151.4889667, 151.47539, 151.47065, 151.4689, 151.45265, 151.44564, 151.45083,
+                151.4588, 151.46561, 151.4886, 151.48956, 151.44245, 151.4434, 151.4392667, 151.43913, 151.42575, 151.4421333,
+                151.4784667, 151.4821167, 151.4749667, 151.45551, 151.4510333, 151.65758, 151.66127, 151.66362, 151.6689, 151.67103, 151.68275, 151.68728, 151.70337)
+)
+```
+
+## Join coordinates data frame to filtered_df2 data frame
+```{r}
+filtered_df2 <- filtered_df2 %>%
+  left_join(station_coords, by = "Station.Name")
+```
+
+## Remove extra columns and rename latlong columns
+```{r}
+filtered_df2 <- filtered_df2[ -c(5,6)]
+filtered_df2 <- rename(filtered_df2, lat = Latitude.y)
+filtered_df2 <- rename(filtered_df2, long = Longitude.y)
+```
+
+```{r}
+# Isolate by species IF NEED BE and create CSV
+lg5 <- filter(filtered_df2, species=="lg5")
+write.csv(lg13, file = "C:/Users/jc347879/OneDrive - James Cook University/Documents/Ajay PhD/writing/thesis_chapter 2/ajay sheets/lg13.csv")
+```
+
+# PLOTTING
+
+## Create an object for the species to plot for
+```{r}
+species_to_plot <- "lg22"
+## Abacus plot 
+filtered_df2 %>%
+     filter(species == species_to_plot) %>%
+     ggplot(mapping = aes(x = datetimeEST, y = as.factor(Station.Name))) +
+     xlab("Date") + ylab("Receiver station") +
+     geom_point() +
+     ggtitle(paste("Plot for species:", species_to_plot))
+```
+
+## Spatial mapping (register google key)
+```{r}
+register_google(key='AIzaSyA3i5Enp3gOTjgh8XzqxlcO6zeIXiOxHJo')
+```
+
+# superimpose receiver sites on map
+```{r}
+baia_map <- leaflet() %>%
+  # Base group
+  addProviderTiles(providers$Esri.WorldImagery, group="Satellite") %>%
+addCircles(lng = station_coords$Longitude, 
+           lat = station_coords$Latitude, 
+           fill=TRUE, color="grey", weight=10, opacity=0.8)
+baia_map
+```
+
+# arrange the dataframe by different species
+```{r}
+filtered_df2 <- filtered_df2 %>% 
+  arrange(species, Station.Name, datetimeEST)
+```
+
+# create new dataframes for each species
+```{r}
+species_list <- split(filtered_df2, filtered_df2$species)
+```
+
+# create new excel files for each species
+```{r}
+for (species_name in names(species_list)) {
+     file_name <- paste0("/Users/jc347879/OneDrive - James Cook University/Documents/Ajay PhD/writing/thesis_chapter 2/species detections", species_name, ".xlsx")
+     write.xlsx(species_list[[species_name]], file = file_name)
+ }
+```
+
+# station count per species
+```{r}
+station_count_per_species <- filtered_df2 %>%
+  group_by(species) %>%
+  summarise(Unique_Stations = n_distinct(Station.Name))
+```
+
+# Calculate the number of detections per species
+```{r}
+detections_per_species <- filtered_df2 %>%
+  group_by(species) %>%
+  summarise(Detections_Per_Species = n())
+```
+
+# Merge the detections information with the station count per species dataframe
+```{r}
+station_count_per_species <- station_count_per_species %>%
+  left_join(detections_per_species, by = "species")
+```  
+# MEAN RESIDENCY INDEX BY SPECIES
+
+# sort the dataframe by species, station name and datetime
+```{r}
+filtered_df2 <- filtered_df2 %>% arrange(species, Station.Name, datetimeEST)
+```
+
+# Calculate the time difference between consecutive detections for the same species at the same station
+```{r}
+filtered_df2 <- filtered_df2 %>%
+  group_by(species, Station.Name) %>%
+  mutate(Time_Diff = as.numeric(difftime(lead(datetimeEST), datetimeEST, units = "hours")))
+```
+
+# Replace NA values in Time_Diff with 0
+```{r}
+filtered_df2$Time_Diff[is.na(filtered_df2$Time_Diff)] <- 0
+```
+
+# Calculate the residency index based on time spent
+```{r}
+filtered_df2 <- filtered_df2 %>%
+  mutate(Residency_Index = 1 / Time_Diff)
+```
+
+# Change infinite values to zeroes
+```{r}
+filtered_df2$Residency_Index[is.infinite(filtered_df2$Residency_Index)] <- 0  
+```
+
+# Calculate the mean residency index per species
+```{r}
+mean_residency_per_species <- filtered_df2 %>%
+  group_by(species) %>%
+  summarise(Mean_Residency_Index = mean(Residency_Index, na.rm = TRUE))
+```
+
+# Calculate the mean residency index per station
+```{r}
+mean_residency_per_station <- filtered_df2 %>%
+  group_by(Station.Name) %>%
+  summarise(Mean_Residency_Index = mean(Residency_Index, na.rm = TRUE))
+```
+# MEAN RESIDENCE
+
+# Calculate the mean residence time per station for each species
+```{r}
+mean_residence_per_station <- filtered_df2 %>%
+  group_by(Station.Name) %>%
+  summarise(Mean_Residence_Time = mean(Time_Diff, na.rm = TRUE))
+```
